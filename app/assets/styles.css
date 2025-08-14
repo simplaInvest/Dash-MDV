@@ -1,0 +1,142 @@
+:root{
+  --brand-blue: #0A84FF;      /* Azul principal */
+  --brand-orange: #FF7A00;    /* Laranja secundária */
+  --bg: #FFFFFF;              /* Fundo */
+  --bg-soft: #F5F7FA;         /* Containers */
+  --text: #111827;            /* Texto */
+  --muted: #6B7280;           /* Texto secundário */
+  --border: #E5E7EB;          /* Bordas leves */
+  --success: #16A34A;
+  --warn: #F59E0B;
+  --error: #DC2626;
+}
+
+/* -------- Layout base -------- */
+html, body, .stApp {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* -------- Cabeçalhos -------- */
+h1, h2, h3 {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* -------- Cards / containers suaves -------- */
+.block-container {
+  padding-top: 1.2rem;
+}
+
+.section-card {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+}
+
+/* -------- Métricas (st.metric) -------- */
+div.stMetric {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+}
+div.stMetric > label {
+  color: var(--muted);
+}
+div.stMetric [data-testid="stMetricValue"] {
+  color: var(--text);
+  font-weight: 800;
+}
+div.stMetric [data-testid="stMetricDelta"]{
+  font-weight: 600;
+}
+
+/* -------- Botões -------- */
+button, .stButton>button {
+  border-radius: 10px;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+}
+
+/* Botão primário = Azul */
+.stButton>button[kind="primary"]{
+  background: var(--brand-blue);
+  color: white;
+  border-color: var(--brand-blue);
+}
+.stButton>button[kind="primary"]:hover{
+  filter: brightness(0.95);
+}
+
+/* Botão secundário = Laranja */
+.stButton>button[kind="secondary"], .btn-orange {
+  background: var(--brand-orange) !important;
+  color: #ffffff !important;
+  border-color: var(--brand-orange) !important;
+}
+.stButton>button[kind="secondary"]:hover, .btn-orange:hover{
+  filter: brightness(0.95);
+}
+
+/* Links de página/atomo */
+a, .stMarkdown a {
+  color: var(--brand-blue);
+}
+
+/* -------- Inputs -------- */
+input, textarea, select, .stTextInput input, .stTextArea textarea, .stDateInput input {
+  border-radius: 10px !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* -------- Tabelas nativas -------- */
+.dataframe td, .dataframe th {
+  border-color: var(--border) !important;
+}
+
+/* -------- Plotly (alguns toques) -------- */
+.js-plotly-plot .plotly .modebar-btn {
+  border-radius: 8px;
+}
+
+/* -------- AgGrid (tema claro custom) -------- */
+.ag-theme-streamlit, .ag-theme-alpine {
+  --ag-background-color: #FFFFFF;
+  --ag-foreground-color: #111827;
+  --ag-header-background-color: #F5F7FA;
+  --ag-header-foreground-color: #111827;
+  --ag-border-color: #E5E7EB;
+  --ag-odd-row-background-color: #FAFBFC;
+  --ag-row-hover-color: #EEF2FF40;
+  --ag-selected-row-background-color: #E8F1FF;
+  --ag-font-size: 13px;
+  --ag-font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+.ag-theme-streamlit .ag-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.ag-theme-streamlit .ag-root-wrapper, 
+.ag-theme-streamlit .ag-root {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+/* Badges (ex.: status) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+.badge-blue { border-color: #BFDBFE; color: #1D4ED8; background: #EFF6FF; }
+.badge-orange { border-color: #FED7AA; color: #C2410C; background: #FFF7ED; }
+.badge-green { border-color: #BBF7D0; color: #166534; background: #ECFDF5; }

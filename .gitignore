@@ -1,0 +1,35 @@
+# Ambiente virtual
+.venv/
+venv/
+ENV/
+env/
+
+# Cache e arquivos temporários
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+
+# Configurações e credenciais locais
+.streamlit/secrets.toml
+.env
+.env.*
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Saídas de execução
+*.sqlite3
+*.db
+*.bak
+
+# Pastas de build
+build/
+dist/
+*.egg-info/
+
+# Outros
+.ipynb_checkpoints/

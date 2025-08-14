@@ -1,0 +1,11 @@
+[theme]
+base = "light"
+
+# Cores principais
+primaryColor = "#0A84FF"          # Azul principal (ajuste se quiser)
+backgroundColor = "#FFFFFF"       # Branco (fundo)
+secondaryBackgroundColor = "#F5F7FA"  # Cartões/containers
+textColor = "#111827"             # Quase preto (boa leitura)
+
+# Tipografia
+font = "sans serif"
