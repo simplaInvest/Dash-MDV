@@ -4,8 +4,8 @@ import pandas as pd
 import pytz
 from datetime import datetime, timedelta
 import plotly.express as px
-from libs.utils import vspace
-from libs.ui import criar_funil, pizza, barras_historico_maiusculas, grafico_origem
+from libs.utils import vspace, calcular_idade, contar_cartoes
+from libs.ui import criar_funil, pizza, barras_historico_maiusculas, grafico_origem, histograma, barras_empilhadas, histograma_simples, barras_simples
 from datetime import date, timedelta
 import streamlit.components.v1 as components
 
@@ -273,262 +273,613 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- Filtros ----------------
-cols_filters = st.columns([1.52,1,1,1])
 
-with cols_filters[0]:
-    # === Filtro de Data ===
-    periodo = st.radio(
-        "📅 Período",
-        ["Dia", "Semana", "Mês", "Personalizada"],
-        index=2,  # Mês como padrão
-        horizontal=True
+tab_comercial, tab_perfis, tab_clientes = st.tabs(tabs = ['Comercial', 'Captação', 'Clientes'])
+
+with tab_comercial:
+    # ---------------- Filtros ----------------
+    cols_filters = st.columns([1.52,1,1,1])
+
+    with cols_filters[0]:
+        # === Filtro de Data ===
+        periodo = st.radio(
+            "📅 Período",
+            ["Dia", "Semana", "Mês", "Personalizada", "Todo o período"],  # + opção nova
+            index=2,  # Mês como padrão
+            horizontal=True
+        )
+
+        hoje = date.today()
+        coluna_data = "Última Atualização de Status"
+
+        # Converte a coluna de data com segurança
+        datas_col = pd.to_datetime(df_leads.get(coluna_data, pd.Series(dtype="object")), errors="coerce", dayfirst=True)
+        min_data_valida = datas_col.min()
+        max_data_valida = datas_col.max()
+
+        # Fallback caso a coluna não exista ou não tenha datas válidas
+        if pd.isna(min_data_valida) or pd.isna(max_data_valida):
+            min_data_valida = hoje - timedelta(days=365)
+            max_data_valida = hoje
+
+        if periodo == "Dia":
+            data_inicio = hoje
+            data_fim = hoje
+        elif periodo == "Semana":
+            data_inicio = hoje - timedelta(days=6)
+            data_fim = hoje
+        elif periodo == "Mês":
+            data_inicio = hoje - timedelta(days=29)
+            data_fim = hoje
+        elif periodo == "Personalizada":
+            col1, col2 = st.columns(2)
+            with col1:
+                data_inicio = st.date_input("Data inicial", max(min_data_valida.date(), hoje - timedelta(days=29)))
+            with col2:
+                data_fim = st.date_input("Data final", max_data_valida.date())
+        elif periodo == "Todo o período":
+            data_inicio = min_data_valida.date()
+            data_fim = max_data_valida.date()
+
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>Período:</strong> {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_filters[1]:
+        # === Origem ===
+        origens = ["TODAS"] + sorted(df_leads["ORIGEM"].dropna().unique().tolist())
+        origem_sel = st.multiselect("📍 Origem", origens, default=["TODAS"])
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>Origem:</strong> {', '.join(origem_sel[:3])}{'...' if len(origem_sel) > 3 else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_filters[2]:
+        # === SDR ===
+        sdrs = ["TODOS"] + sorted(df_leads["SDR"].dropna().unique().tolist())
+        sdr_sel = st.multiselect("👤 SDR", sdrs, default=["TODOS"])
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>SDR:</strong> {', '.join(sdr_sel[:3])}{'...' if len(sdr_sel) > 3 else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_filters[3]:
+        # === Call com ===
+        calls = ["TODOS"] + sorted(df_leads["CALL COM:"].dropna().unique().tolist())
+        call_sel = st.multiselect("📞 Call com", calls, default=["TODOS"])
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>Call com:</strong> {', '.join(call_sel[:3])}{'...' if len(call_sel) > 3 else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ---------------- Aplicar Filtros ----------------
+    df_filtrado = df_leads.copy()
+
+    # Filtra por data
+    coluna_data = "Última Atualização de Status"
+    if coluna_data in df_filtrado.columns:
+        datas = pd.to_datetime(df_filtrado[coluna_data], errors="coerce", dayfirst=True)
+        mask = (datas.dt.date >= data_inicio) & (datas.dt.date <= data_fim)
+        df_filtrado = df_filtrado[mask]
+
+    # Filtra por Origem
+    if "TODAS" not in origem_sel:
+        df_filtrado = df_filtrado[df_filtrado["ORIGEM"].isin(origem_sel)]
+
+    # Filtra por SDR
+    if "TODOS" not in sdr_sel:
+        df_filtrado = df_filtrado[df_filtrado["SDR"].isin(sdr_sel)]
+
+    # Filtra por Call com
+    if "TODOS" not in call_sel:
+        df_filtrado = df_filtrado[df_filtrado["CALL COM:"].isin(call_sel)]
+
+    # ---------------- Métricas KPI ----------------
+    vspace(15)
+    st.markdown("""
+    <div class="metrics-container">
+        <div class="metrics-title">📊 Funil </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    cols_metrics = st.columns(5)
+
+    # Calculando métricas
+    qtd_marcadas = (
+        pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Marcada'], errors='coerce')
+        .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
+        .sum()
     )
 
-    hoje = date.today()
-    if periodo == "Dia":
-        data_inicio = hoje
-        data_fim = hoje
-    elif periodo == "Semana":
-        data_inicio = hoje - timedelta(days=6)
-        data_fim = hoje
-    elif periodo == "Mês":
-        data_inicio = hoje - timedelta(days=29)
-        data_fim = hoje
-    elif periodo == "Personalizada":
-        col1, col2 = st.columns(2)
-        with col1:
-            data_inicio = st.date_input("Data inicial", hoje - timedelta(days=29))
-        with col2:
-            data_fim = st.date_input("Data final", hoje)
+    qtd_realizadas = (
+        pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Realizada'], errors='coerce')
+        .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
+        .sum()
+    )
 
-    st.markdown(f"""
-    <div class="filter-info">
-        <strong>Período:</strong> {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}
+    valor_noshow = (df_filtrado['STATUS'].astype(str).str.upper() == 'NO-SHOW').sum()
+    valor_contratos = (df_filtrado['STATUS'].astype(str).str.upper() == 'GANHOU').sum()
+
+    # Exibindo métricas com cards customizados
+    with cols_metrics[0]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{len(df_filtrado):,}</div>
+            <div class="metric-label">Abordagens</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_metrics[1]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{int(qtd_marcadas):,}</div>
+            <div class="metric-label">Reuniões Marcadas</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_metrics[2]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{int(qtd_realizadas):,}</div>
+            <div class="metric-label">Reuniões Realizadas</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_metrics[3]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{int(valor_noshow):,}</div>
+            <div class="metric-label">No Show</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols_metrics[4]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{int(valor_contratos):,}</div>
+            <div class="metric-label">Contratos Assinados</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    vspace(15)
+
+    # ----- Seção de Análise do Funil ----- #
+
+    # Dados do funil
+    etapas = ["Abordagens", "Reuniões Marcadas", "Reuniões Realizadas", "Contratos Assinados"]
+    valores = [
+        len(df_filtrado),
+        int(qtd_marcadas),
+        int(qtd_realizadas),
+        int(valor_contratos)
+    ]
+
+    # Funções auxiliares
+    def pct(num, den):
+        return (num / den * 100) if den else 0.0
+
+    def fmt_int(n):
+        return f"{int(n):,}".replace(",", ".")
+
+    # >>> CORREÇÃO: função para garantir que o progress receba sempre [0.0, 1.0]
+    def safe_progress_from_pct(pct_value: float) -> float:
+        try:
+            return max(0.0, min(float(pct_value) / 100.0, 1.0))
+        except Exception:
+            return 0.0
+
+    # Layout em duas colunas
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Gráfico do funil
+        st.plotly_chart(criar_funil(etapas, valores), use_container_width=True)
+
+    with col2:
+        # Cálculos de conversão
+        conv_abord_reun_marc = pct(valores[1], valores[0])
+        conv_reun_marc_real = pct(valores[2], valores[1])
+        conv_real_contrato = pct(valores[3], valores[2])
+        taxa_no_show = pct(valor_noshow, valores[1])
+
+
+        # Métricas de conversão
+        col_conv1, col_conv2 = st.columns(2)
+
+        with col_conv1:
+            st.metric(
+                "Abord. → Reuniões",
+                f"{conv_abord_reun_marc:.1f}%",
+                f"{fmt_int(valores[1])}/{fmt_int(valores[0])}"
+            )
+            st.progress(safe_progress_from_pct(conv_abord_reun_marc))
+
+            st.metric(
+                "Marcadas → Realizadas",
+                f"{conv_reun_marc_real:.1f}%",
+                f"{fmt_int(valores[2])}/{fmt_int(valores[1])}"
+            )
+            st.progress(safe_progress_from_pct(conv_reun_marc_real))
+
+        with col_conv2:
+            st.metric(
+                "Realizadas → Contratos",
+                f"{conv_real_contrato:.1f}%",
+                f"{fmt_int(valores[3])}/{fmt_int(valores[2])}"
+            )
+            st.progress(safe_progress_from_pct(conv_real_contrato))
+
+            st.metric(
+                "Taxa de No Show",
+                f"{taxa_no_show:.1f}%",
+                f"{fmt_int(valor_noshow)}/{fmt_int(valores[1])}"
+            )
+            st.progress(safe_progress_from_pct(taxa_no_show))
+
+        # Conversão total
+
+        conversao_total = pct(valores[3], valores[0])
+        st.markdown(f"""
+        <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%); border-radius: 8px; margin-top: 1rem;">
+            <span style="color: #ff7a00; font-weight: 800;">Conversão Total do Funil:</span><br>
+            <span style="font-weight: 900; font-size: 1.2rem; background: linear-gradient(135deg, #0a84ff 0%, #ff7a00 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{conversao_total:.1f}%</span>
+        </div>
+        """, unsafe_allow_html=True)
+    st.divider()
+    # ----- Seção de Gráficos Detalhados ----- #
+    st.markdown("""
+    <div class="charts-section">
+        <div class="charts-title">📈 Análises Detalhadas</div>
     </div>
     """, unsafe_allow_html=True)
 
-with cols_filters[1]:
-    # === Origem ===
-    origens = ["TODAS"] + sorted(df_leads["ORIGEM"].dropna().unique().tolist())
-    origem_sel = st.multiselect("📍 Origem", origens, default=["TODAS"])
+    col1, col2 = st.columns(2)
+    with col1:
+        st.plotly_chart(barras_historico_maiusculas(df_filtrado), use_container_width=True)
+    with col2:
+        st.plotly_chart(grafico_origem(df_filtrado)[0], use_container_width=True)
+
+    # ----- Footer informativo ----- #
+    st.markdown("---")
     st.markdown(f"""
-    <div class="filter-info">
-        <strong>Origem:</strong> {', '.join(origem_sel[:3])}{'...' if len(origem_sel) > 3 else ''}
+    <div style="text-align: center; color: #6b7280; font-size: 0.9rem; padding: 1rem;">
+        Dashboard CRM de Milhas • Última atualização: {datetime.now().strftime("%d/%m/%Y às %H:%M")} • Dados em tempo real
     </div>
     """, unsafe_allow_html=True)
 
-with cols_filters[2]:
-    # === SDR ===
-    sdrs = ["TODOS"] + sorted(df_leads["SDR"].dropna().unique().tolist())
-    sdr_sel = st.multiselect("👤 SDR", sdrs, default=["TODOS"])
-    st.markdown(f"""
-    <div class="filter-info">
-        <strong>SDR:</strong> {', '.join(sdr_sel[:3])}{'...' if len(sdr_sel) > 3 else ''}
+with tab_perfis:
+    # ---------------- Filtros ----------------
+    cols_filters = st.columns(2)
+
+    with cols_filters[0]:
+        # === Filtro de Data ===
+        periodo = st.radio(
+            "📅 Captado",
+            ["Dia", "Semana", "Mês", "Personalizada", "Todo o período"],  # + opção nova
+            index=2,  # Mês como padrão
+            horizontal=True
+        )
+
+        hoje = date.today()
+        coluna_data = "CRIADO"
+
+        # Converte a coluna de data com segurança
+        datas_col = pd.to_datetime(df_leads.get(coluna_data, pd.Series(dtype="object")), errors="coerce", dayfirst=True)
+        min_data_valida = datas_col.min()
+        max_data_valida = datas_col.max()
+
+        # Fallback caso a coluna não exista ou não tenha datas válidas
+        if pd.isna(min_data_valida) or pd.isna(max_data_valida):
+            min_data_valida = hoje - timedelta(days=365)
+            max_data_valida = hoje
+
+        if periodo == "Dia":
+            data_inicio = hoje
+            data_fim = hoje
+        elif periodo == "Semana":
+            data_inicio = hoje - timedelta(days=6)
+            data_fim = hoje
+        elif periodo == "Mês":
+            data_inicio = hoje - timedelta(days=29)
+            data_fim = hoje
+        elif periodo == "Personalizada":
+            col1, col2 = st.columns(2)
+            with col1:
+                data_inicio = st.date_input("Data inicial", max(min_data_valida.date(), hoje - timedelta(days=29)))
+            with col2:
+                data_fim = st.date_input("Data final", max_data_valida.date())
+        elif periodo == "Todo o período":
+            data_inicio = min_data_valida.date()
+            data_fim = max_data_valida.date()
+
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>Período:</strong> {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}
+        </div>
+        """, unsafe_allow_html=True)
+
+
+    with cols_filters[1]:
+        # === Origem ===
+        origens = ["TODAS"] + sorted(df_leads["ORIGEM"].dropna().unique().tolist())
+        origem_sel = st.multiselect("📍 Origem da captação", origens, default=["TODAS"])
+        st.markdown(f"""
+        <div class="filter-info">
+            <strong>Origem:</strong> {', '.join(origem_sel[:3])}{'...' if len(origem_sel) > 3 else ''}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ---------------- Aplicar Filtros ----------------
+    df_cap = df_leads.copy()
+
+    # Filtra por data
+    coluna_data = "CRIADO"
+    if coluna_data in df_cap.columns:
+        datas = pd.to_datetime(df_cap[coluna_data], errors="coerce", dayfirst=True)
+        mask = (datas.dt.date >= data_inicio) & (datas.dt.date <= data_fim)
+        df_cap = df_cap[mask]
+
+    # Filtra por Origem
+    if "TODAS" not in origem_sel:
+        df_cap = df_cap[df_cap["ORIGEM"].isin(origem_sel)]
+
+    # ---------------- Gráficos ----------------
+
+    # ====== Seção: Visão Financeira (2 colunas) ======
+    st.markdown("""
+    <div class="charts-section">
+    <div class="charts-title">💰 Visão Financeira</div>
     </div>
     """, unsafe_allow_html=True)
 
-with cols_filters[3]:
-    # === Call com ===
-    calls = ["TODOS"] + sorted(df_leads["CALL COM:"].dropna().unique().tolist())
-    call_sel = st.multiselect("📞 Call com", calls, default=["TODOS"])
-    st.markdown(f"""
-    <div class="filter-info">
-        <strong>Call com:</strong> {', '.join(call_sel[:3])}{'...' if len(call_sel) > 3 else ''}
+    fin_col1, fin_col2 = st.columns(2, vertical_alignment="top")
+    with fin_col1:
+        st.caption("Distribuição do gasto mensal (padrão cortado na média)")
+        histograma(df_cap, 'GASTO MÉDIO MENSAL', 20)
+
+    with fin_col2:
+        st.caption("Distribuição do limite total (padrão cortado na média)")
+        histograma(df_cap, 'LIMITE DOS CARTÕES SOMADOS', 15)
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+
+    # ====== Seção: Perfil & Jornada (2 colunas) ======
+    st.markdown("""
+    <div class="charts-section">
+    <div class="charts-title">🧭 Perfil & Jornada</div>
     </div>
     """, unsafe_allow_html=True)
 
-# ---------------- Aplicar Filtros ----------------
-df_filtrado = df_leads.copy()
+    perfil_col1, perfil_col2 = st.columns(2, vertical_alignment="top")
+    with perfil_col1:
+        st.caption("Nível de conhecimento em milhas (empilhado por status de acúmulo)")
+        barras_empilhadas(df_cap, 'NÍVEL DE CONHECIMENTO EM MILHAS')
 
-# Filtra por data
-coluna_data = "Última Atualização de Status"
-if coluna_data in df_filtrado.columns:
-    datas = pd.to_datetime(df_filtrado[coluna_data], errors="coerce", dayfirst=True)
-    mask = (datas.dt.date >= data_inicio) & (datas.dt.date <= data_fim)
-    df_filtrado = df_filtrado[mask]
+    with perfil_col2:
+        st.caption("Frequência de viagens no ano (empilhado por status de acúmulo)")
+        # mantido o nome do parâmetro conforme seu uso atual
+        barras_empilhadas(df_cap, 'QUANTAS VEZES COSTUMA VIAJAR NO ANO', stat_col='JÁ ACUMULA MILHAS?')
 
-# Filtra por Origem
-if "TODAS" not in origem_sel:
-    df_filtrado = df_filtrado[df_filtrado["ORIGEM"].isin(origem_sel)]
+    st.markdown("<hr/>", unsafe_allow_html=True)
 
-# Filtra por SDR
-if "TODOS" not in sdr_sel:
-    df_filtrado = df_filtrado[df_filtrado["SDR"].isin(sdr_sel)]
-
-# Filtra por Call com
-if "TODOS" not in call_sel:
-    df_filtrado = df_filtrado[df_filtrado["CALL COM:"].isin(call_sel)]
-
-# ---------------- Métricas KPI ----------------
-vspace(15)
-st.markdown("""
-<div class="metrics-container">
-    <div class="metrics-title">📊 Funil </div>
-</div>
-""", unsafe_allow_html=True)
-
-cols_metrics = st.columns(5)
-
-# Calculando métricas
-qtd_marcadas = (
-    pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Marcada'], errors='coerce')
-    .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
-    .sum()
-)
-
-qtd_realizadas = (
-    pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Realizada'], errors='coerce')
-    .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
-    .sum()
-)
-
-valor_noshow = (df_filtrado['STATUS'].astype(str).str.upper() == 'NO-SHOW').sum()
-valor_contratos = (df_filtrado['STATUS'].astype(str).str.upper() == 'GANHOU').sum()
-
-# Exibindo métricas com cards customizados
-with cols_metrics[0]:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-value">{len(df_filtrado):,}</div>
-        <div class="metric-label">Abordagens</div>
+    # ====== Seção: Status & Qualificação (3 colunas) ======
+    st.markdown("""
+    <div class="charts-section">
+    <div class="charts-title">✅ Status & Qualificação</div>
     </div>
     """, unsafe_allow_html=True)
 
-with cols_metrics[1]:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-value">{int(qtd_marcadas):,}</div>
-        <div class="metric-label">Reuniões Marcadas</div>
+    status_col1, status_col2, status_col3 = st.columns(3, vertical_alignment="top")
+    with status_col1:
+        st.caption("Status: já acumula milhas?")
+        pizza(df_cap, 'JÁ ACUMULA MILHAS?')
+
+    with status_col2:
+        st.caption("Qualificado?")
+        pizza(df_cap, 'Qualificado?')
+
+    with status_col3:
+        st.caption("Distribuição por consultor")
+        barras_empilhadas(df_cap, 'Qual Consultor da Simpla Invest')
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+
+    # ====== Seção: Objetivos (1 coluna cheia) ======
+    st.markdown("""
+    <div class="charts-section">
+    <div class="charts-title">🎯 Objetivos Declarados</div>
     </div>
     """, unsafe_allow_html=True)
 
-with cols_metrics[2]:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-value">{int(qtd_realizadas):,}</div>
-        <div class="metric-label">Reuniões Realizadas</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.caption("Principais objetivos informados pelos leads")
+    pizza(df_cap, 'OBJETIVO')
 
-with cols_metrics[3]:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-value">{int(valor_noshow):,}</div>
-        <div class="metric-label">No Show</div>
-    </div>
-    """, unsafe_allow_html=True)
+with tab_clientes:
+    # ===== Helpers =====
+    def _to_num(s, dec=0):
+        v = pd.to_numeric(s, errors="coerce")
+        if v.ndim == 0:
+            return 0 if pd.isna(v) else (round(float(v), dec))
+        return v
 
-with cols_metrics[4]:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-value">{int(valor_contratos):,}</div>
-        <div class="metric-label">Contratos Assinados</div>
-    </div>
-    """, unsafe_allow_html=True)
+    def _fmt_moeda(v):
+        try:
+            v = float(v)
+            return "R$ {:,.0f}".format(v).replace(",", ".")
+        except Exception:
+            return "R$ 0"
+        
+    from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
 
-vspace(15)
+    def delete_outlier(df: pd.DataFrame, coluna: str, which: str = "max", remove_all: bool = False) -> pd.DataFrame:
+        """
+        Remove o menor ou o maior valor de uma coluna (apenas uma ocorrência por padrão).
+        Suporta colunas numéricas e de data.
 
-# ----- Seção de Análise do Funil ----- #
+        Params
+        ------
+        df : DataFrame
+        coluna : nome da coluna
+        which : "max" ou "min"
+        remove_all : se True, remove todas as linhas iguais ao valor extremo; se False, remove só a primeira ocorrência
 
-# Dados do funil
-etapas = ["Abordagens", "Reuniões Marcadas", "Reuniões Realizadas", "Contratos Assinados"]
-valores = [
-    len(df_filtrado),
-    int(qtd_marcadas),
-    int(qtd_realizadas),
-    int(valor_contratos)
-]
+        Returns
+        -------
+        DataFrame filtrado
+        """
+        if coluna not in df.columns:
+            raise ValueError(f"Coluna '{coluna}' não existe no DataFrame.")
 
-# Funções auxiliares
-def pct(num, den):
-    return (num / den * 100) if den else 0.0
+        out = df.copy()
 
-def fmt_int(n):
-    return f"{int(n):,}".replace(",", ".")
+        # Normaliza a série dependendo do tipo
+        s = out[coluna]
 
-# >>> CORREÇÃO: função para garantir que o progress receba sempre [0.0, 1.0]
-def safe_progress_from_pct(pct_value: float) -> float:
+        if is_datetime64_any_dtype(s):
+            s_dt = s
+        else:
+            # tenta numérico; se não rolar, tenta datetime
+            s_num = pd.to_numeric(s, errors="coerce")
+            if s_num.notna().any():
+                s_dt = s_num  # usamos s_dt só como "série de comparação"
+            else:
+                s_dt = pd.to_datetime(s, errors="coerce")
+
+        if s_dt.isna().all():
+            # nada a fazer
+            return out
+
+        if which.lower() == "max":
+            extremo = s_dt.max()
+            if remove_all:
+                out = out[s_dt != extremo]
+            else:
+                idx = s_dt.idxmax()
+                out = out.drop(index=idx)
+        elif which.lower() == "min":
+            extremo = s_dt.min()
+            if remove_all:
+                out = out[s_dt != extremo]
+            else:
+                idx = s_dt.idxmin()
+                out = out.drop(index=idx)
+        else:
+            raise ValueError("Parâmetro 'which' deve ser 'max' ou 'min'.")
+
+        return out
+
+    df_clientes = delete_outlier(df_clientes, "Gasto Mensal", which="max", remove_all=False)
+    df_clientes = delete_outlier(df_clientes, "Data de Nascimento", which="min")
+
+    # ===== KPIs (topo) =====
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+
+    total_econ = _to_num(df_clientes["Total Economia"]).sum()
+    total_clientes = len(df_clientes)
+    gasto_mensal_med = _to_num(df_clientes.get("Gasto Mensal", pd.Series(dtype=float))).mean()
+
+    # idade média (usa sua função)
     try:
-        return max(0.0, min(float(pct_value) / 100.0, 1.0))
+        df_idades_tmp = calcular_idade(df_clientes.copy())
+        idade_media = pd.to_numeric(df_idades_tmp.get("Idade"), errors="coerce").dropna().mean()
     except Exception:
-        return 0.0
+        idade_media = None
 
-# Layout em duas colunas
-col1, col2 = st.columns(2)
+    with col_k1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_moeda(total_econ)}</div>
+            <div class="metric-label">Economia Gerada</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_k2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{total_clientes}</div>
+            <div class="metric-label">Clientes Ativos</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_k3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_moeda(gasto_mensal_med)}</div>
+            <div class="metric-label">Gasto Mensal Médio</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_k4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{idade_media:.1f}</div>
+            <div class="metric-label">Idade Média</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-with col1:
-    # Gráfico do funil
-    st.plotly_chart(criar_funil(etapas, valores), use_container_width=True)
+    st.markdown("<hr/>", unsafe_allow_html=True)
 
-with col2:
-    # Cálculos de conversão
-    conv_abord_reun_marc = pct(valores[1], valores[0])
-    conv_reun_marc_real = pct(valores[2], valores[1])
-    conv_real_contrato = pct(valores[3], valores[2])
-    taxa_no_show = pct(valor_noshow, valores[1])
-
-
-    # Métricas de conversão
-    col_conv1, col_conv2 = st.columns(2)
-
-    with col_conv1:
-        st.metric(
-            "Abord. → Reuniões",
-            f"{conv_abord_reun_marc:.1f}%",
-            f"{fmt_int(valores[1])}/{fmt_int(valores[0])}"
-        )
-        st.progress(safe_progress_from_pct(conv_abord_reun_marc))
-
-        st.metric(
-            "Marcadas → Realizadas",
-            f"{conv_reun_marc_real:.1f}%",
-            f"{fmt_int(valores[2])}/{fmt_int(valores[1])}"
-        )
-        st.progress(safe_progress_from_pct(conv_reun_marc_real))
-
-    with col_conv2:
-        st.metric(
-            "Realizadas → Contratos",
-            f"{conv_real_contrato:.1f}%",
-            f"{fmt_int(valores[3])}/{fmt_int(valores[2])}"
-        )
-        st.progress(safe_progress_from_pct(conv_real_contrato))
-
-        st.metric(
-            "Taxa de No Show",
-            f"{taxa_no_show:.1f}%",
-            f"{fmt_int(valor_noshow)}/{fmt_int(valores[1])}"
-        )
-        st.progress(safe_progress_from_pct(taxa_no_show))
-
-    # Conversão total
-
-    conversao_total = pct(valores[3], valores[0])
-    st.markdown(f"""
-    <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%); border-radius: 8px; margin-top: 1rem;">
-        <span style="color: #ff7a00; font-weight: 800;">Conversão Total do Funil:</span><br>
-        <span style="font-weight: 900; font-size: 1.2rem; background: linear-gradient(135deg, #0a84ff 0%, #ff7a00 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{conversao_total:.1f}%</span>
+    # ===== Demografia =====
+    st.markdown("""
+    <div class="charts-section">
+      <div class="charts-title">🧑‍🤝‍🧑 Demografia</div>
     </div>
     """, unsafe_allow_html=True)
-st.divider()
-# ----- Seção de Gráficos Detalhados ----- #
-st.markdown("""
-<div class="charts-section">
-    <div class="charts-title">📈 Análises Detalhadas</div>
-</div>
-""", unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.plotly_chart(barras_historico_maiusculas(df_filtrado), use_container_width=True)
-with col2:
-    st.plotly_chart(grafico_origem(df_filtrado)[0], use_container_width=True)
+    dem_c1, dem_c2, dem_c3 = st.columns(3, vertical_alignment="top")
+    with dem_c1:
+        st.caption("Filhos")
+        pizza(df_clientes, "Filhos")
 
-# ----- Footer informativo ----- #
-st.markdown("---")
-st.markdown(f"""
-<div style="text-align: center; color: #6b7280; font-size: 0.9rem; padding: 1rem;">
-    Dashboard CRM de Milhas • Última atualização: {datetime.now().strftime("%d/%m/%Y às %H:%M")} • Dados em tempo real
-</div>
-""", unsafe_allow_html=True)
+    with dem_c2:
+        st.caption("Estado civil")
+        pizza(df_clientes, "Estado Civil")
+
+    with dem_c3:
+        st.caption("Distribuição de idades")
+        # usa sua própria função para gerar a coluna Idade
+        df_idades = calcular_idade(df_clientes.copy())
+        histograma_simples(df_idades, "Idade", bins=20)
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+
+    # ===== Finanças =====
+    st.markdown("""
+    <div class="charts-section">
+      <div class="charts-title">💰 Finanças</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    fin_c1, fin_c2 = st.columns(2, vertical_alignment="top")
+    with fin_c1:
+        st.caption("Distribuição do gasto mensal")
+        histograma(df_clientes, "Gasto Mensal", bins=10)
+
+    with fin_c2:
+        # Você pode adicionar outro chart financeiro aqui no futuro (ex.: economia por faixa etc.)
+        # Por ora, deixamos um espaço com uma observação discreta:
+        st.caption("—")
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+
+    # ===== Cartões =====
+    st.markdown("""
+    <div class="charts-section">
+      <div class="charts-title">💳 Cartões</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.caption("Top 10 cartões individuais mais frequentes (desmembrando combinações)")
+    df_cartoes = contar_cartoes(df_clientes)  # retorna colunas: Cartão, Contagem
+    barras_simples(df_cartoes, "Cartão", "Contagem")
+
+    # ===== Tabela (opcional) =====
+    st.markdown("---")
+    st.dataframe(df_clientes, use_container_width=True)
+
+
+
+    
+

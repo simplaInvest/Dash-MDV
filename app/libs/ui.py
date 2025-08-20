@@ -33,47 +33,6 @@ def criar_funil(etapas, valores):
     )
     return fig
 
-def pizza(df, col="Qualificado?"):
-    s = df[col]
-
-    # Contagens (preserva NA)
-    counts = s.value_counts(dropna=False)
-
-    # Ordem desejada e filtrada aos presentes
-    order = [True, False, pd.NA]
-    order = [x for x in order if x in counts.index]
-    counts = counts.reindex(order)
-
-    # Rótulos humanizados
-    label_map = {True: "Sim", False: "Não", pd.NA: "Sem dados"}
-    labels = [label_map[i] for i in counts.index]
-    values = counts.values
-
-    # Cores pela identidade visual
-    color_map = {"Sim": "#0A84FF", "Não": "orange", "Sem dados": "#101923"}
-
-    fig = px.pie(
-        values=values,
-        names=labels,
-        color=labels,                  # <- usa os rótulos como chave de cor
-        color_discrete_map=color_map,
-        hole=0.45
-    )
-    fig.update_traces(
-        textinfo="label+percent",
-        textfont_size=16,
-        pull=[0.05 if lab == "Sim" else 0 for lab in labels],
-    )
-    fig.update_layout(
-        title_text="📊 Qualificação dos Leads",
-        title_x=0.2, title_font_size=20,
-        showlegend=False,
-        margin=dict(t=50, b=80, l=80, r=80),
-        paper_bgcolor="white", plot_bgcolor="white",
-        font=dict(color="black"),
-    )
-    return fig
-
 def barras_historico_maiusculas(df, col="HISTÓRICO"):
     # Filtra apenas strings totalmente maiúsculas
     filtrado = df[df[col].apply(lambda x: isinstance(x, str) and x.isupper())]
@@ -168,3 +127,161 @@ def grafico_origem(df: pd.DataFrame, col="ORIGEM", top_n: int = 12):
         xaxis=dict(range=[0, data_plot["Quantidade"].max() * 1.2])
     )
     return fig, counts
+
+###################
+
+def histograma(data, coluna, bins):
+    # Garante numérico e remove NaN
+    serie = pd.to_numeric(data[coluna], errors='coerce').dropna()
+    if serie.empty:
+        st.warning(f"A coluna '{coluna}' não possui valores numéricos válidos para o histograma.")
+        return
+
+    # Define limites
+    xmax_media = float(serie.mean())
+    xmax_total = float(serie.max())
+    xmin = float(serie.min())
+
+    # --- Dados filtrados (padrão) ---
+    dados_media = serie[serie <= xmax_media]
+
+    # Cria histograma inicial (padrão = média)
+    fig = px.histogram(
+        x=dados_media,
+        nbins=bins,
+        title=coluna,
+        text_auto=True
+    )
+    fig.update_xaxes(range=[xmin, xmax_media])
+
+    # --- Adiciona botões para alternar entre "Média" e "Completo" ---
+    fig.update_layout(
+        updatemenus=[
+            {
+                "buttons": [
+                    {
+                        "label": "Até a Média",
+                        "method": "update",
+                        "args": [
+                            {"x": [dados_media]},  # dados filtrados
+                            {"xaxis": {"range": [xmin, xmax_media]}}
+                        ]
+                    },
+                    {
+                        "label": "Série Completa",
+                        "method": "update",
+                        "args": [
+                            {"x": [serie]},       # todos os dados
+                            {"xaxis": {"range": [xmin, xmax_total]}}
+                        ]
+                    }
+                ],
+                "direction": "right",
+                "x": 0.5,
+                "y": 1.15,
+                "showactive": True
+            }
+        ]
+    )
+
+    return st.plotly_chart(fig, use_container_width=True)
+
+def pizza(data, coluna):
+    df = data.copy()
+
+    # Conta a frequência de cada categoria
+    contagem = df[coluna].value_counts().reset_index()
+    contagem.columns = [coluna, "Frequência"]
+
+    # Gera o gráfico de pizza
+    fig = px.pie(
+        contagem,
+        names=coluna,         # rótulos das fatias
+        values="Frequência",  # tamanhos proporcionais
+        title=f"Distribuição de {coluna}",
+        hole=0.3              # opcional: transforma em gráfico de rosca
+    )
+
+    return st.plotly_chart(fig, use_container_width=True)
+
+def barras_empilhadas(data, coluna, stat_col: str = ""):
+    df = data.copy()
+
+    # --- validações ---
+    if coluna not in df.columns:
+        st.error(f"A coluna principal '{coluna}' não existe no DataFrame.")
+        return
+
+    # ordem desejada para alguns casos conhecidos
+    if coluna == 'QUANTAS VEZES COSTUMA VIAJAR NO ANO':
+        ordem_categorias = ["Apenas uma vez", "2 vezes", "3 vezes", "Mais que 3 vezes"]
+    elif coluna == 'NÍVEL DE CONHECIMENTO EM MILHAS':
+        ordem_categorias = ['Leigo', 'Iniciante', 'Intermediário', 'Avançado']
+    else:
+        # ordem automática (ordenada alfabeticamente pelas categorias vistas)
+        ordem_categorias = sorted(df[coluna].dropna().unique().tolist())
+
+    # --- caso 1: sem coluna de empilhamento (barras simples) ---
+    if not stat_col:
+        contagem = df[coluna].value_counts(dropna=False).reset_index()
+        contagem.columns = [coluna, "Frequência"]
+
+        fig = px.bar(
+            contagem,
+            x=coluna,
+            y="Frequência",
+            text="Frequência",
+            title=f"{coluna}"
+        )
+        fig.update_layout(barmode="relative")
+        fig.update_traces(textposition="inside")
+        fig.update_xaxes(categoryorder="array", categoryarray=ordem_categorias)
+
+        return st.plotly_chart(fig, use_container_width=True)
+
+    # --- caso 2: com coluna de empilhamento (barras empilhadas) ---
+    if stat_col not in df.columns:
+        st.error(f"A coluna de empilhamento '{stat_col}' não existe no DataFrame.")
+        return
+
+    # Opcional: tratar ausentes para não quebrar a legenda
+    df[stat_col] = df[stat_col].fillna("Não informado")
+
+    contagem = df.groupby([coluna, stat_col]).size().reset_index(name="Frequência")
+
+    fig = px.bar(
+        contagem,
+        x=coluna,
+        y="Frequência",
+        color=stat_col,
+        text="Frequência",
+        title=f"{coluna} por {stat_col}",
+        category_orders={coluna: ordem_categorias}
+    )
+    fig.update_layout(barmode="stack")
+    fig.update_traces(textposition="inside")
+
+    return st.plotly_chart(fig, use_container_width=True)
+
+def histograma_simples(data, coluna, bins):
+    # Garante numérico e remove NaN
+    serie = pd.to_numeric(data[coluna], errors='coerce').dropna()
+    if serie.empty:
+        st.warning(f"A coluna '{coluna}' não possui valores numéricos válidos para o histograma.")
+        return
+
+    # Cria histograma inicial (padrão = média)
+    fig = px.histogram(
+        x= serie,
+        nbins=bins,
+        title=coluna,
+        text_auto=True
+    )
+
+    return st.plotly_chart(fig, use_container_width=True)
+
+def barras_simples(data, x, y):
+    df = data.copy()
+    fig = px.bar(df, x = x, y = y, text_auto=True)
+
+    return st.plotly_chart(fig)

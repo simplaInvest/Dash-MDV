@@ -9,3 +9,7 @@ textColor = "#111827"             # Quase preto (boa leitura)
 
 # Tipografia
 font = "sans serif"
+
+[server]
+
+runOnSave = true
