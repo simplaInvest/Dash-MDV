@@ -391,13 +391,13 @@ with tab_comercial:
 
     # Calculando métricas
     qtd_marcadas = (
-        pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Marcada'], errors='coerce')
+        pd.to_datetime(df_filtrado['Call Agendada'], errors='coerce')
         .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
         .sum()
     )
 
     qtd_realizadas = (
-        pd.to_datetime(df_filtrado['[AUTO] Data da Reunião Realizada'], errors='coerce')
+        pd.to_datetime(df_filtrado['Reunião Realizada'], errors='coerce')
         .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
         .sum()
     )
@@ -447,6 +447,7 @@ with tab_comercial:
         """, unsafe_allow_html=True)
 
     vspace(15)
+
 
     # ----- Seção de Análise do Funil ----- #
 
