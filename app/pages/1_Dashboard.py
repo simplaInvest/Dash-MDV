@@ -265,6 +265,26 @@ if "df_leads" not in st.session_state or st.session_state["df_leads"] is None:
 df_leads = st.session_state["df_leads"].copy()
 df_clientes = st.session_state["df_clientes"].copy()
 
+# ===== Util de datas (robusto p/ ISO e dd/mm/aaaa) =====
+import pandas as pd
+def _parse_datetime_mixed(series: pd.Series) -> pd.Series:
+    """
+    Converte uma série com datas em formatos mistos:
+    - ISO do Airtable (ex.: 2025-04-11T12:17:48.000Z)
+    - Strings dd/mm/aaaa
+
+    Retorna uma série datetime (timezone-aware para ISO), com NaT onde não parsear.
+    """
+    s = series.astype(str)
+    iso_mask = s.str.contains(r"\d{4}-\d{2}-\d{2}T", na=False)
+    # Parse ISO como timezone-aware e remove o timezone para ficar consistente
+    dt_iso_aw = pd.to_datetime(s.where(iso_mask), errors="coerce", utc=True, infer_datetime_format=True)
+    dt_iso = dt_iso_aw.dt.tz_localize(None)
+    # Parse dd/mm/aaaa
+    dt_local = pd.to_datetime(s.where(~iso_mask), errors="coerce", dayfirst=True, infer_datetime_format=True)
+    # Une resultados (todos tz-naive)
+    return dt_iso.combine_first(dt_local)
+
 # ===== Header Principal =====
 st.markdown("""
 <div class="dashboard-header">
@@ -292,8 +312,8 @@ with tab_comercial:
         hoje = date.today()
         coluna_data = "Última Atualização de Status"
 
-        # Converte a coluna de data com segurança
-        datas_col = pd.to_datetime(df_leads.get(coluna_data, pd.Series(dtype="object")), errors="coerce", dayfirst=True)
+        # Converte a coluna de data com segurança (suporta ISO e dd/mm/aaaa)
+        datas_col = _parse_datetime_mixed(df_leads.get(coluna_data, pd.Series(dtype="object")))
         min_data_valida = datas_col.min()
         max_data_valida = datas_col.max()
 
@@ -363,7 +383,8 @@ with tab_comercial:
     # Filtra por data
     coluna_data = "Última Atualização de Status"
     if coluna_data in df_filtrado.columns:
-        datas = pd.to_datetime(df_filtrado[coluna_data], errors="coerce", dayfirst=True)
+        # Converte datas com robustez (ISO e dd/mm/aaaa)
+        datas = _parse_datetime_mixed(df_filtrado[coluna_data])
         mask = (datas.dt.date >= data_inicio) & (datas.dt.date <= data_fim)
         df_filtrado = df_filtrado[mask]
 
@@ -390,6 +411,12 @@ with tab_comercial:
     cols_metrics = st.columns(5)
 
     # Calculando métricas
+    qtd_abordados = (
+        pd.to_datetime(df_filtrado['Abordado'], errors='coerce')
+        .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
+        .sum()
+    )
+
     qtd_marcadas = (
         pd.to_datetime(df_filtrado['Call Agendada'], errors='coerce')
         .between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim))
@@ -454,7 +481,7 @@ with tab_comercial:
     # Dados do funil
     etapas = ["Abordagens", "Reuniões Marcadas", "Reuniões Realizadas", "Contratos Assinados"]
     valores = [
-        len(df_filtrado),
+        int(qtd_abordados),
         int(qtd_marcadas),
         int(qtd_realizadas),
         int(valor_contratos)
@@ -569,8 +596,8 @@ with tab_perfis:
         hoje = date.today()
         coluna_data = "CRIADO"
 
-        # Converte a coluna de data com segurança
-        datas_col = pd.to_datetime(df_leads.get(coluna_data, pd.Series(dtype="object")), errors="coerce", dayfirst=True)
+        # Converte a coluna de data com segurança (suporta ISO e dd/mm/aaaa)
+        datas_col = _parse_datetime_mixed(df_leads.get(coluna_data, pd.Series(dtype="object")))
         min_data_valida = datas_col.min()
         max_data_valida = datas_col.max()
 
@@ -621,7 +648,8 @@ with tab_perfis:
     # Filtra por data
     coluna_data = "CRIADO"
     if coluna_data in df_cap.columns:
-        datas = pd.to_datetime(df_cap[coluna_data], errors="coerce", dayfirst=True)
+        # Converte datas com robustez (ISO e dd/mm/aaaa)
+        datas = _parse_datetime_mixed(df_cap[coluna_data])
         mask = (datas.dt.date >= data_inicio) & (datas.dt.date <= data_fim)
         df_cap = df_cap[mask]
 
@@ -883,4 +911,4 @@ with tab_clientes:
 
 
     
-
+st.dataframe(df_filtrado)
