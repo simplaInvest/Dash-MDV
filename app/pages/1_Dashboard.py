@@ -276,12 +276,13 @@ def _parse_datetime_mixed(series: pd.Series) -> pd.Series:
     Retorna uma série datetime (timezone-aware para ISO), com NaT onde não parsear.
     """
     s = series.astype(str)
-    iso_mask = s.str.contains(r"\d{4}-\d{2}-\d{2}T", na=False)
-    # Parse ISO como timezone-aware e remove o timezone para ficar consistente
-    dt_iso_aw = pd.to_datetime(s.where(iso_mask), errors="coerce", utc=True, infer_datetime_format=True)
+    # Detecta formatos ISO com ou sem tempo: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, etc.
+    iso_mask = s.str.match(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$", na=False)
+    # Parse ISO como timezone-aware (quando aplicável) e remove o timezone para ficar consistente
+    dt_iso_aw = pd.to_datetime(s.where(iso_mask), errors="coerce", utc=True)
     dt_iso = dt_iso_aw.dt.tz_localize(None)
-    # Parse dd/mm/aaaa
-    dt_local = pd.to_datetime(s.where(~iso_mask), errors="coerce", dayfirst=True, infer_datetime_format=True)
+    # Parse local dd/mm/aaaa (e variações com hífen), preferindo dia primeiro
+    dt_local = pd.to_datetime(s.where(~iso_mask), errors="coerce", dayfirst=True)
     # Une resultados (todos tz-naive)
     return dt_iso.combine_first(dt_local)
 
@@ -436,7 +437,7 @@ with tab_comercial:
     with cols_metrics[0]:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-value">{len(df_filtrado):,}</div>
+            <div class="metric-value">{qtd_abordados:,}</div>
             <div class="metric-label">Abordagens</div>
         </div>
         """, unsafe_allow_html=True)
@@ -571,6 +572,139 @@ with tab_comercial:
         st.plotly_chart(barras_historico_maiusculas(df_filtrado), use_container_width=True)
     with col2:
         st.plotly_chart(grafico_origem(df_filtrado)[0], use_container_width=True)
+
+    # ----- SLA dentro da aba Comercial ----- #
+    st.markdown("""
+    <div class="charts-section">
+        <div class="charts-title">⏱ SLA de Etapas</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    def _fmt_timedelta(td: pd.Timedelta) -> str:
+        if td is None or pd.isna(td):
+            return "—"
+        secs = int(td.total_seconds())
+        d = secs // 86400
+        h = (secs % 86400) // 3600
+        m = (secs % 3600) // 60
+        parts = []
+        if d:
+            parts.append(f"{d}d")
+        if h or d:
+            parts.append(f"{h}h")
+        parts.append(f"{m}m")
+        return " ".join(parts)
+
+    def _avg_duration(df: pd.DataFrame, start_col: str, end_col: str) -> pd.Timedelta | None:
+        if start_col not in df.columns or end_col not in df.columns:
+            return None
+        s_start = _parse_datetime_mixed(df[start_col])
+        s_end = _parse_datetime_mixed(df[end_col])
+        # Fallback: se 'Abordado' estiver vazio, usa 'Call Agendada' (quando existir)
+        if start_col.strip().lower() == "abordado" and "Call Agendada" in df.columns:
+            s_ab_fallback = _parse_datetime_mixed(df["Call Agendada"])
+            s_start = s_start.fillna(s_ab_fallback)
+        delta = s_end - s_start
+        valid = delta.dropna()
+        valid = valid[valid >= pd.Timedelta(0)]
+        if valid.empty:
+            return None
+        return valid.mean()
+
+    # Usar sempre o df_filtrado para os cálculos
+    base = df_filtrado
+
+    # Cálculos das durações médias por etapa
+    avg_criado_abordado = _avg_duration(base, "CRIADO", "Abordado")
+    avg_abordado_call = _avg_duration(base, "Abordado", "Call Agendada")
+    avg_call_realizada = _avg_duration(base, "Call Agendada", "Reunião Realizada")
+    avg_realizada_ganhou = _avg_duration(base, "Reunião Realizada", "GANHOU")
+    avg_realizada_perdeu = _avg_duration(base, "Reunião Realizada", "PERDEU")
+    avg_abordado_ganhou = _avg_duration(base, "Abordado", "GANHOU")
+    avg_abordado_perdeu = _avg_duration(base, "Abordado", "PERDEU")
+
+    # Card inicial (CRIADO → Abordado) ocupando toda a largura
+    st.markdown(f"""
+    <div class="metric-card" style="margin-bottom: 0.75rem;">
+        <div class="metric-value">{_fmt_timedelta(avg_criado_abordado)}</div>
+        <div class="metric-label">CRIADO → Abordado</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Duas colunas verticais separando os caminhos GANHOU e PERDEU
+    c_ganhou, c_perdeu = st.columns(2)
+
+    with c_ganhou:
+        st.markdown("""
+        <div class="metrics-title">Rumo a GANHOU</div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_abordado_call)}</div>
+            <div class="metric-label">Abordado → Call Agendada</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_call_realizada)}</div>
+            <div class="metric-label">Call Agendada → Reunião Realizada</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_realizada_ganhou)}</div>
+            <div class="metric-label">Reunião Realizada → GANHOU</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_abordado_ganhou)}</div>
+            <div class="metric-label">Abordado → GANHOU</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c_perdeu:
+        st.markdown("""
+        <div class="metrics-title">Rumo a PERDEU</div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_abordado_call)}</div>
+            <div class="metric-label">Abordado → Call Agendada</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_call_realizada)}</div>
+            <div class="metric-label">Call Agendada → Reunião Realizada</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_realizada_perdeu)}</div>
+            <div class="metric-label">Reunião Realizada → PERDEU</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{_fmt_timedelta(avg_abordado_perdeu)}</div>
+            <div class="metric-label">Abordado → PERDEU</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    data_rows = [
+        {"Transição": "CRIADO → Abordado", "Média": _fmt_timedelta(avg_criado_abordado)},
+        {"Transição": "Abordado → Call Agendada", "Média": _fmt_timedelta(avg_abordado_call)},
+        {"Transição": "Call Agendada → Reunião Realizada", "Média": _fmt_timedelta(avg_call_realizada)},
+        {"Transição": "Reunião Realizada → GANHOU", "Média": _fmt_timedelta(avg_realizada_ganhou)},
+        {"Transição": "Reunião Realizada → PERDEU", "Média": _fmt_timedelta(avg_realizada_perdeu)},
+        {"Transição": "Abordado → GANHOU", "Média": _fmt_timedelta(avg_abordado_ganhou)},
+        {"Transição": "Abordado → PERDEU", "Média": _fmt_timedelta(avg_abordado_perdeu)},
+    ]
+    st.dataframe(pd.DataFrame(data_rows), use_container_width=True)
+
+    # (Tabela de diagnóstico removida conforme solicitação)
 
     # ----- Footer informativo ----- #
     st.markdown("---")
@@ -912,3 +1046,4 @@ with tab_clientes:
 
     
 st.dataframe(df_filtrado)
+df_filtrado['Abordado'].iloc[0]
